@@ -18,6 +18,9 @@ type FakeMempool interface {
 	// AddTransactions adds transactions to the mempool (thread-safe).
 	AddTransactions(transactions []*types.Transaction)
 
+	// AddRawSequencerTxs adds raw RLP tx bytes as sequencer txs (e.g. Mantle 10-field DepositTx). Thread-safe.
+	AddRawSequencerTxs(rawTxs [][]byte)
+
 	// NextBlock returns the next block of transactions to be included in the chain.
 	NextBlock() (sendTxs [][]byte, sequencerTxs [][]byte)
 }
@@ -72,6 +75,12 @@ func (m *StaticWorkloadMempool) AddTransactions(transactions []*types.Transactio
 			m.currentBlockSequencerTxs = append(m.currentBlockSequencerTxs, bytes)
 		}
 	}
+}
+
+func (m *StaticWorkloadMempool) AddRawSequencerTxs(rawTxs [][]byte) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.currentBlockSequencerTxs = append(m.currentBlockSequencerTxs, rawTxs...)
 }
 
 // returns nonce of latest transaction. This will be incremented by the transaction generators.

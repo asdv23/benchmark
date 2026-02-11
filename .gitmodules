@@ -4,3 +4,9 @@
 [submodule "contracts/lib/forge-std"]
 	path = contracts/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "repos/mantle-op-geth"]
+	path = repos/mantle-op-geth
+	url = https://github.com/mantlenetworkio/op-geth.git
+[submodule "repos/mantle-reth"]
+	path = repos/mantle-reth
+	url = https://github.com/mantle-xyz/reth.git

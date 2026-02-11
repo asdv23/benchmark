@@ -6,6 +6,7 @@ import (
 	"os"
 
 	appFlags "github.com/base/base-bench/benchmark/flags"
+	"github.com/base/base-bench/runner/flags"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	"github.com/urfave/cli/v2"
 )
@@ -27,6 +28,7 @@ type Config interface {
 	MachineRegion() string
 	FileSystem() string
 	ParallelTxBatches() int
+	MantleCompat() bool
 }
 
 type config struct {
@@ -41,8 +43,9 @@ type config struct {
 	machineType     string
 	machineProvider string
 	machineRegion   string
-	fileSystem      string
+	fileSystem        string
 	parallelTxBatches int
+	mantleCompat      bool
 }
 
 func NewConfig(ctx *cli.Context) Config {
@@ -57,9 +60,10 @@ func NewConfig(ctx *cli.Context) Config {
 		machineType:     ctx.String(appFlags.MachineTypeFlagName),
 		machineProvider: ctx.String(appFlags.MachineProviderFlagName),
 		machineRegion:   ctx.String(appFlags.MachineRegionFlagName),
-		fileSystem:      ctx.String(appFlags.FileSystemFlagName),
+		fileSystem:        ctx.String(appFlags.FileSystemFlagName),
 		parallelTxBatches: ctx.Int(appFlags.ParallelTxBatchesFlagName),
-		clientOptions:   ReadClientOptions(ctx),
+		mantleCompat:      ctx.Bool(flags.MantleCompat),
+		clientOptions:     ReadClientOptions(ctx),
 	}
 }
 
@@ -134,4 +138,8 @@ func (c *config) FileSystem() string {
 
 func (c *config) ParallelTxBatches() int {
 	return c.parallelTxBatches
+}
+
+func (c *config) MantleCompat() bool {
+	return c.mantleCompat
 }

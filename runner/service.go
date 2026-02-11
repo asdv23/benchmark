@@ -33,6 +33,36 @@ import (
 
 var ErrAlreadyStopped = errors.New("already stopped")
 
+// ensureMantleChainConfig patches chain.json so config has Mantle fork time fields.
+// go-ethereum Genesis encoding drops fields not in params.ChainConfig (e.g. mantleSkadiTime).
+// Mantle geth and reth both need these in chain spec; reth uses mantle_skadi_time for Shanghai.
+func ensureMantleChainConfig(chainCfgPath string) error {
+	data, err := os.ReadFile(chainCfgPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	config, _ := root["config"].(map[string]interface{})
+	if config == nil {
+		config = make(map[string]interface{})
+		root["config"] = config
+	}
+	zero := float64(0)
+	for _, key := range []string{"mantleEverestTime", "mantleSkadiTime", "mantleLimbTime", "mantleArsiaTime"} {
+		if _, has := config[key]; !has {
+			config[key] = zero
+		}
+	}
+	data, err = json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(chainCfgPath, data, 0644)
+}
+
 type Service interface {
 	Run(ctx context.Context) error
 }
@@ -96,6 +126,16 @@ func (s *service) setupInternalDirectories(testDir string, params types.RunParam
 	err = json.NewEncoder(chainCfgFile).Encode(genesis)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to write chain config")
+	}
+	if err = chainCfgFile.Close(); err != nil {
+		return nil, errors.Wrap(err, "failed to close chain config file")
+	}
+
+	// Mantle geth/reth need Mantle fork times in config; go-ethereum encoding omits them.
+	if s.config.MantleCompat() {
+		if err := ensureMantleChainConfig(chainCfgPath); err != nil {
+			return nil, errors.Wrap(err, "failed to patch chain.json for Mantle")
+		}
 	}
 
 	var dataDirPath string

@@ -1,0 +1,24 @@
+# Mantle op-geth only (same as basic.yml but node_type: geth only)
+name: Transfer-only (Mantle Geth)
+description: Basic transfer benchmark for Mantle op-geth only.
+
+payloads:
+  - name: Transfer-only execution speed
+    id: transfer-only
+    type: transfer-only
+
+benchmarks:
+  - variables:
+      - type: payload
+        value: transfer-only
+      - type: node_type
+        values:
+          - geth
+      - type: num_blocks
+        value: 10
+      - type: gas_limit
+        values:
+          - 20000000
+          - 30000000
+          - 60000000
+          - 90000000

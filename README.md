@@ -232,8 +232,13 @@ OPTIONS:
 
    # General Options
    --proxy-port value              Proxy port (default: 8546)
+   --mantle-compat                 Use Mantle-compatible DepositTx RLP (10 fields); set when using Mantle op-geth/reth ($BASE_BENCH_MANTLE_COMPAT)
    --help, -h                      Show help (default: false)
 ```
+
+### Mantle client compatibility
+
+When running against **Mantle** forks of op-geth or reth, use `--mantle-compat` (or `BASE_BENCH_MANTLE_COMPAT=true`) so that L1 deposit transactions are encoded with Mantle’s 10-field RLP (EthValue, EthTxValue). Otherwise you may see: `transaction 0 is not valid: rlp: too few elements for types.DepositTx`. See [docs/mantle-deposittx-diff.md](docs/mantle-deposittx-diff.md) for the field difference.
 
 ## Managing Test Runs
 

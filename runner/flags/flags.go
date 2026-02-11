@@ -11,6 +11,7 @@ const (
 	BuilderBin      = "builder-bin"
 	GethBin         = "geth-bin"
 	BaseRethNodeBin = "base-reth-node-bin"
+	MantleCompat    = "mantle-compat"
 )
 
 func CLIFlags(envPrefix string) []cli.Flag {
@@ -38,6 +39,12 @@ func CLIFlags(envPrefix string) []cli.Flag {
 			Usage:   "Base Reth Node binary path",
 			Value:   "base-reth-node",
 			EnvVars: opservice.PrefixEnvVar(envPrefix, "BASE_RETH_NODE_BIN"),
+		},
+		&cli.BoolFlag{
+			Name:    MantleCompat,
+			Usage:   "Use Mantle-compatible DepositTx RLP (10 fields: adds EthValue, EthTxValue)",
+			Value:   false,
+			EnvVars: opservice.PrefixEnvVar(envPrefix, "MANTLE_COMPAT"),
 		},
 	}
 }

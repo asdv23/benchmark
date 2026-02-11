@@ -23,6 +23,8 @@ type ConsensusClientOptions struct {
 	GasLimitSetup uint64
 	// ParallelTxBatches is the number of parallel batches for sending transactions
 	ParallelTxBatches int
+	// MantleCompat encodes L1 DepositTx with Mantle's 10-field RLP (EthValue, EthTxValue)
+	MantleCompat bool
 }
 
 // BaseConsensusClient contains common functionality shared between different consensus client implementations.

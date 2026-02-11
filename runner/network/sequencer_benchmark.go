@@ -86,9 +86,22 @@ func (nb *sequencerBenchmark) fundTestAccount(ctx context.Context, mempool mempo
 		},
 	)
 
-	txHash := depositTx.Hash()
-
-	mempool.AddTransactions([]*ethTypes.Transaction{depositTx})
+	var txHash common.Hash
+	if nb.config.Config.MantleCompat() {
+		rawBytes, err := depositTx.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("marshal deposit tx: %w", err)
+		}
+		rawBytes, err = consensus.ConvertDepositTxToMantleRLP(rawBytes)
+		if err != nil {
+			return fmt.Errorf("convert deposit tx to mantle rlp: %w", err)
+		}
+		txHash = crypto.Keccak256Hash(rawBytes)
+		mempool.AddRawSequencerTxs([][]byte{rawBytes})
+	} else {
+		txHash = depositTx.Hash()
+		mempool.AddTransactions([]*ethTypes.Transaction{depositTx})
+	}
 
 	// wait for the transaction to be mined
 	receipt, err := retry.Do(ctx, 60, retry.Fixed(1*time.Second), func() (*ethTypes.Receipt, error) {
@@ -208,6 +221,7 @@ func (nb *sequencerBenchmark) Run(ctx context.Context, metricsCollector metrics.
 			GasLimit:          params.GasLimit,
 			GasLimitSetup:     1e9, // 1G gas
 			ParallelTxBatches: nb.config.Config.ParallelTxBatches(),
+			MantleCompat:      nb.config.Config.MantleCompat(),
 		}, headBlockHash, headBlockNumber, l1Chain, nb.config.BatcherAddr())
 
 		payloads := make([]engine.ExecutableData, 0)

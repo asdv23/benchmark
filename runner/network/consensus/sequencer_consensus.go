@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -61,6 +62,10 @@ func (f *SequencerConsensusClient) Stop(ctx context.Context) error {
 
 	return nil
 }
+
+// MantleArsiaL1AttributesSelector is the 4-byte selector for setL1BlockValuesArsia in the L1Block predeploy.
+// Must match mantle-op-geth core/types/rollup_cost.go MantleArsiaL1AttributesSelector for payload validation.
+var MantleArsiaL1AttributesSelector = []byte{0x49, 0xe7, 0x23, 0x83}
 
 // marshalBinaryWithSignature creates the call data for an L1Info transaction.
 func marshalBinaryWithSignature(info *derive.L1BlockInfo, signature []byte) ([]byte, error) {
@@ -112,6 +117,104 @@ func marshalBinaryWithSignature(info *derive.L1BlockInfo, signature []byte) ([]b
 	return w.Bytes(), nil
 }
 
+// mantleDepositTxRLP matches Mantle op-geth DepositTx RLP order (10 fields).
+// Used when MantleCompat is set to avoid "rlp: too few elements for types.DepositTx".
+type mantleDepositTxRLP struct {
+	SourceHash          common.Hash
+	From                common.Address
+	To                  *common.Address
+	Mint                *big.Int
+	Value               *big.Int
+	Gas                 uint64
+	IsSystemTransaction bool
+	EthValue            *big.Int
+	Data                []byte
+	EthTxValue          *big.Int
+}
+
+// baseDepositTxRLP is the 8-field RLP decoded from Base/OP DepositTx (for conversion to Mantle).
+type baseDepositTxRLP struct {
+	SourceHash          common.Hash
+	From                common.Address
+	To                  *common.Address
+	Mint                *big.Int
+	Value               *big.Int
+	Gas                 uint64
+	IsSystemTransaction bool
+	Data                []byte
+}
+
+// ConvertDepositTxToMantleRLP rewrites 8-field DepositTx RLP bytes as 10-field Mantle RLP.
+// If txBytes is already 10-field Mantle RLP, returns it unchanged. txBytes must start with types.DepositTxType (0x7E).
+func ConvertDepositTxToMantleRLP(txBytes []byte) ([]byte, error) {
+	if len(txBytes) == 0 || txBytes[0] != types.DepositTxType {
+		return txBytes, nil
+	}
+	// Already 10-field (e.g. funding tx from AddRawSequencerTxs)? Pass through.
+	var mantleCheck mantleDepositTxRLP
+	if err := rlp.DecodeBytes(txBytes[1:], &mantleCheck); err == nil {
+		return txBytes, nil
+	}
+	var inner baseDepositTxRLP
+	if err := rlp.DecodeBytes(txBytes[1:], &inner); err != nil {
+		return nil, fmt.Errorf("decode base deposit tx: %w", err)
+	}
+	mantle := &mantleDepositTxRLP{
+		SourceHash:          inner.SourceHash,
+		From:                inner.From,
+		To:                  inner.To,
+		Mint:                inner.Mint,
+		Value:               inner.Value,
+		Gas:                 inner.Gas,
+		IsSystemTransaction: inner.IsSystemTransaction,
+		EthValue:            nil,
+		Data:                inner.Data,
+		EthTxValue:          nil,
+	}
+	var buf bytes.Buffer
+	buf.WriteByte(types.DepositTxType)
+	if err := rlp.Encode(&buf, mantle); err != nil {
+		return nil, fmt.Errorf("encode mantle deposit tx: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func (f *SequencerConsensusClient) encodeL1DepositTx(sourceHash common.Hash, data []byte) ([]byte, error) {
+	if f.options.MantleCompat {
+		// Mantle expects 10 RLP elements; Base only encodes 8. Encode with EthValue and EthTxValue as nil.
+		inner := &mantleDepositTxRLP{
+			SourceHash:          sourceHash,
+			From:                derive.L1InfoDepositerAddress,
+			To:                  &derive.L1BlockAddress,
+			Mint:                nil,
+			Value:               big.NewInt(0),
+			Gas:                 1_000_000,
+			IsSystemTransaction: false,
+			EthValue:            nil,
+			Data:                data,
+			EthTxValue:          nil,
+		}
+		var buf bytes.Buffer
+		buf.WriteByte(types.DepositTxType)
+		if err := rlp.Encode(&buf, inner); err != nil {
+			return nil, fmt.Errorf("mantle deposit tx rlp: %w", err)
+		}
+		return buf.Bytes(), nil
+	}
+	out := &types.DepositTx{
+		SourceHash:          sourceHash,
+		From:                derive.L1InfoDepositerAddress,
+		To:                  &derive.L1BlockAddress,
+		Mint:                nil,
+		Value:               big.NewInt(0),
+		Gas:                 1_000_000,
+		IsSystemTransaction: false,
+		Data:                data,
+	}
+	l1Tx := types.NewTx(out)
+	return l1Tx.MarshalBinary()
+}
+
 func (f *SequencerConsensusClient) generatePayloadAttributes(sequencerTxs [][]byte, isSetupPayload bool) (*eth.PayloadAttributes, *common.Hash, error) {
 	gasLimit := eth.Uint64Quantity(f.options.GasLimit)
 	if isSetupPayload {
@@ -158,25 +261,16 @@ func (f *SequencerConsensusClient) generatePayloadAttributes(sequencerTxs [][]by
 		SeqNumber:   l1BlockInfo.SequenceNumber,
 	}
 
-	data, err := marshalBinaryWithSignature(l1BlockInfo, derive.L1InfoFuncJovianBytes4)
+	l1Selector := derive.L1InfoFuncJovianBytes4
+	if f.options.MantleCompat {
+		l1Selector = MantleArsiaL1AttributesSelector
+	}
+	data, err := marshalBinaryWithSignature(l1BlockInfo, l1Selector)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Set a very large gas limit with `IsSystemTransaction` to ensure
-	// that the L1 Attributes Transaction does not run out of gas.
-	out := &types.DepositTx{
-		SourceHash:          source.SourceHash(),
-		From:                derive.L1InfoDepositerAddress,
-		To:                  &derive.L1BlockAddress,
-		Mint:                nil,
-		Value:               big.NewInt(0),
-		Gas:                 1_000_000,
-		IsSystemTransaction: false,
-		Data:                data,
-	}
-	l1Tx := types.NewTx(out)
-	opaqueL1Tx, err := l1Tx.MarshalBinary()
+	opaqueL1Tx, err := f.encodeL1DepositTx(source.SourceHash(), data)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encode L1 info tx: %w", err)
 	}
@@ -184,6 +278,13 @@ func (f *SequencerConsensusClient) generatePayloadAttributes(sequencerTxs [][]by
 	sequencerTxsHexBytes := make([]hexutil.Bytes, len(sequencerTxs)+1)
 	sequencerTxsHexBytes[0] = hexutil.Bytes(opaqueL1Tx)
 	for i, tx := range sequencerTxs {
+		if f.options.MantleCompat {
+			mantleTx, err := ConvertDepositTxToMantleRLP(tx)
+			if err != nil {
+				return nil, nil, err
+			}
+			tx = mantleTx
+		}
 		sequencerTxsHexBytes[i+1] = hexutil.Bytes(tx)
 	}
 
